@@ -4,9 +4,11 @@
 #include <stdio.h>
 
 
-QueuePtr createQueue() {
+QueuePtr createQueue(int max) {
     QueuePtr q;
     q = (QueuePtr) malloc(sizeof(Queue));
+    q->contents = malloc(sizeof(LogMsg) * max);
+    q->max = max;    
     q->front = 0;
     q->count = 0;
     return q;
@@ -17,11 +19,11 @@ int isEmpty(QueuePtr q) {
 }
 
 void enqueue(QueuePtr q, LogMsg logMsg) {
-    if (q->count >= MAX_BUFS) {
+    if (q->count >= q->max) {
         fprintf(stderr, "Queue is full!\n");
         exit(1);
     }
-    q->contents[(q->front + q->count++) % MAX_BUFS] = logMsg;
+    q->contents[(q->front + q->count++) % q->max] = logMsg;
 }
 
 LogMsg dequeue(QueuePtr q) {
@@ -31,7 +33,7 @@ LogMsg dequeue(QueuePtr q) {
     }
     LogMsg result = q->contents[q->front];
     q->front++;
-    q->front %= MAX_BUFS;
+    q->front %= q->max;
     q->count--;
     return result;
 }

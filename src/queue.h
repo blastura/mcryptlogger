@@ -3,12 +3,13 @@
 typedef struct Queue *QueuePtr;
 
 typedef struct Queue {
-    LogMsg contents[MAX_BUFS];
     int front;
     int count;
+    int max;
+    LogMsg *contents;//[MAX_BUFS];
 } Queue;
 
-QueuePtr createQueue();
+QueuePtr createQueue(int max);
 int isEmpty(QueuePtr q);
 void enqueue(QueuePtr q, LogMsg logMsg);
 LogMsg dequeue(QueuePtr q);

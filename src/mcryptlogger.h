@@ -1,5 +1,5 @@
 #define LOG_MSG_SIZE 4000
-#define MAXLINESIZE 127
+#define MAXKEYSIZE 127
 #define MAX_BUFS 4
 
 #ifndef LOGMSG
@@ -11,5 +11,4 @@ typedef struct {
     int fifo;
     unsigned char message[LOG_MSG_SIZE];
 } LogMsg;
-
 #endif /* LOGMSG  */
