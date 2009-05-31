@@ -1,33 +1,25 @@
 /*
  * Name: Anton Johansson
  * Mail: dit06ajn@cs.umu.se
- * Time-stamp: "2009-05-31 15:24:25 anton"
+ * Time-stamp: "2009-06-01 01:38:22 anton"
  */
 
 #include "mcryptlogger.h"
 #include "queue.h"
+#include "xorcrypt.h"
 
-#include <fcntl.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+/* Variables */
+static QueuePtr freeBufQueue;
+// pthread_mutex_t freeQueueMutex;
+// pthread_cond_t freeQueueCond;
 
-
-QueuePtr freeMsgQueue;
-pthread_mutex_t freeQueueMutex;
-pthread_cond_t freeQueueCond;
-
-QueuePtr filledMsgQueue;
-pthread_mutex_t filledQueueMutex;
-pthread_cond_t filledQueueCond;
+static QueuePtr filledBufQueue;
+// pthread_mutex_t filledQueueMutex;
+// pthread_cond_t filledQueueCond;
 
 char key[127];
-int global_counter;
+
+/* Methods */
 void *sayHello(void *ptr);
 void *readThreadInit(void *ptr);
 void *cryptThreadInit(void *ptr);
@@ -39,9 +31,9 @@ void usage() {
 
 int main(int argc, char **argv) {
     // Check for flags
-    int nrOfCryptThreads;
-    int nrOfReadThreads;
-    int nrOfBuffers;
+    int nrOfCryptThreads = 0;
+    int nrOfReadThreads = 0;
+    int nrOfBuffers = 0;
     int ch;
     const char *optstring = "C:P:B:";
     while((ch = getopt(argc, argv, optstring)) != -1) {
@@ -73,44 +65,50 @@ int main(int argc, char **argv) {
     }
 
     /* Init Queues to hold Buffers with log messages */
-    freeMsgQueue = createQueue(nrOfBuffers);
-    filledMsgQueue = createQueue(nrOfBuffers);
-
+    freeBufQueue = createQueue(nrOfBuffers);
+    filledBufQueue = createQueue(nrOfBuffers);
+    printf("filledbufqueue: "); printQueue(filledBufQueue);
+    for (int i = 0; i < nrOfBuffers; i++) {
+        LogBuf b;
+        b.fifo = -1;
+        b.message = malloc(LOG_MSG_SIZE);
+        enqueue(freeBufQueue, b);
+        printf("enqueueing%d\n", i);
+    }
+    
+    printf("freeBufQueue: "); printQueue(freeBufQueue);
+    dequeue(filledBufQueue);
+    
     /* Read key from file `keys' */
     char key[MAXKEYSIZE];
     readKey(key, MAXKEYSIZE);
     printf("key: %s\n", key);
 
-    /* Init mutexs */
-    if (pthread_mutex_init(&freeQueueMutex, NULL) != 0
-        || pthread_mutex_init(&filledQueueMutex, NULL) != 0) {
-        fprintf(stderr, "Failed to init mutex\n");
-    }
-
-    /* Init condition variables */
-    if(pthread_cond_init(&freeQueueCond, NULL) != 0
-       || pthread_cond_init(&filledQueueCond, NULL) != 0) {
-        fprintf(stderr, "Failed to init condition variables.\n");
-    }
-    
     /* Start read threads */
     pthread_t readThreadArray[nrOfReadThreads];
     for (int i = 0; i < nrOfReadThreads; i++) {
-        if (pthread_create(&readThreadArray[i], NULL, readThreadInit, "hello") != 0) {
+        if (pthread_create(&readThreadArray[i], NULL, readThreadInit,
+                           (void*) i) != 0) {
             fprintf(stderr, "Failed to create thread.\n");
         }
-    }
-    // Wait for read threads
-    for (int i = 0; i < nrOfReadThreads; i++) {
-        pthread_join(readThreadArray[i], NULL);
     }
 
     /* Start crypt threads */
     pthread_t cryptThreadArray[nrOfCryptThreads];
     for (int i = 0; i < nrOfCryptThreads; i++) {
-        if (pthread_create(&cryptThreadArray[i], NULL, cryptThreadInit, "hello") != 0) {
+        if (pthread_create(&cryptThreadArray[i], NULL, cryptThreadInit,
+                           (void*) i) != 0) {
             fprintf(stderr, "Failed to create thread.\n");
         }
+    }
+
+    // Wait for read threads
+    for (int i = 0; i < nrOfReadThreads; i++) {
+        pthread_join(readThreadArray[i], NULL);
+    }
+
+    // Wait for crypt threads
+    for (int i = 0; i < nrOfCryptThreads; i++) {
         pthread_join(cryptThreadArray[i], NULL);
     }
 
@@ -126,60 +124,101 @@ int readKey(char key[], int maxkeysize) {
         perror("Couldn't open keys:");
         return 1;
     }
-    
+
     fclose(keyFile);
     return 0;
 }
 
+/** Function to initialize readThreads */
 void *readThreadInit(void *ptr) {
-    int id = global_counter++;
-
-    char fifo_name[1]; // TODO: fileLength
+    int id = (int) ptr;
+    printf("Hello from readthread %d\n", id);
+    printf("filledBufQueue from readThread: "); printQueue(filledBufQueue);
+    char fifo_name[2]; // TODO: fileLength
     sprintf(fifo_name, "%d", id);
     unlink(fifo_name); // Remove possibly existing fifo
-    
     /* Create fifo */
     if (mkfifo(fifo_name, S_IRWXU) != 0) {
         fprintf(stderr, "Failed to create fifo");
         exit(1);
     }
-    
-    /* Open fifo for reading */
-    printf("Före file open id: %d\n", id);
-    int fd;
-    if ((fd = open(fifo_name, O_RDONLY)) < 0) {
-        fprintf(stderr, "Couldn't open fifo '%s' for reading", fifo_name);
-        unlink(fifo_name);
-        exit(1);
+
+
+    while (1) {
+        int fd;
+        /* Open fifo for reading */
+        if ((fd = open(fifo_name, O_RDONLY)) < 0) {
+            fprintf(stderr, "Couldn't open fifo '%s' for reading", fifo_name);
+            unlink(fifo_name);
+            exit(1);
+        }
+
+        int n;
+        unsigned char rbuf[LOG_MSG_SIZE];
+        /* Wait for one byte from fifo */
+        if ((n = read(fd, rbuf, 1)) == 1) {
+            //write(STDOUT_FILENO, buf, n);
+        }
+
+        
+        /* Wait and read one byte from fifo */
+        LogBuf *lbuf;
+        /* Wait for a free buffer to fill */
+        while ((lbuf = dequeue(freeBufQueue)) == NULL) {
+            printf("Waiting for a freeBuf in freeBufQueue\n");
+            pthread_cond_wait(&freeBufQueue->cond, &freeBufQueue->mutex);
+        }
+        printf("ReadThread: Got a freeBuf from freeBufQueue\n");
+        printQueue(filledBufQueue);
+        
+        /* Read rest of content (LOG_MSG_SIZE - 1) from fifo */
+        if ((n = read(fd, rbuf, (LOG_MSG_SIZE - 1))) == (LOG_MSG_SIZE - 1)) {
+            /* Create buffert containing message and fifo number */
+            lbuf->fifo = id;
+            lbuf->message = rbuf;// = {id, buf};
+            fprintf(stderr, "ReadThread: enqueuing new message\n");
+            printQueue(filledBufQueue);
+            enqueue(filledBufQueue, *lbuf);
+        } else {
+            fprintf(stderr, "ReadThread: Logg-message of incorrect size: %d\n", n);
+        }
+        close(fd);
     }
-    
-    /* Read from fifo until end-of file and print to stdout */
-    int n;
-    char buf[1024]; // TODO: fix size
-    printf("Hej detta är uskrivet från tråd id: %d\n ", id);
-    while ((n = read(fd, buf, sizeof(buf))) > 0) {
-        write(STDOUT_FILENO, buf, n);
-        printf("buf: %s", buf);
-    }
-    printf("Hej detta är uskrivet från tråd id: %d \n", id);
-    
-    close(fd);
+
     unlink(fifo_name);
-    
-    printf("Goodbye from tthread %d\n", id);
+
+    printf("Goodbye from read Thread %d\n", id);
     return NULL;
 }
 
-
 void *cryptThreadInit(void *ptr) {
-    int id = global_counter++;
-    printf("Hello cryptThreadInit!%s\n", (char*) ptr);
-    printf("Goodbye from tthread %d\n", id);
+    int id = (int) ptr;
+    printf("Hello cryptThreadInit! %d\n", id);
+
+    while (1) {
+
+        LogBuf *buf;
+        /* Wait for filledQueueCond, if another thread steals buffer
+         * queue is still returns NULL then wait again */
+        while ((buf = dequeue(filledBufQueue)) == NULL) {
+            /* The pthread_cond_wait() function atomically unlocks the
+             * mutex argument and waits on the cond argument. */
+            printf("CryptThread: waiting for a filledBufQueue->cond\n");
+            pthread_cond_wait(&filledBufQueue->cond, &filledBufQueue->mutex);
+            printf("CryptThread: got a filledBufQueue->cond\n");
+        }
+        printf("CryptThread: got a Buf\n");
+        unsigned char *cryptMsg
+            = xorcrypt(buf->message, LOG_MSG_SIZE, (unsigned char*) key);
+        printf("cryptmsg: %s\n", cryptMsg);
+    }
+
+    printf("Goodbye from crypt thread %d\n", id);
     return NULL;
 }
 
 void* sayHello(void *ptr) {
-    int id = global_counter++;
+    int id = (int) ptr;
     printf("Hello World!%s\n", (char*) ptr);
     printf("Goodbye from tthread %d\n", id);
     return NULL;

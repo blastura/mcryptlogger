@@ -6,11 +6,13 @@ typedef struct Queue {
     int front;
     int count;
     int max;
-    LogMsg *contents;//[MAX_BUFS];
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    LogBuf *contents;
 } Queue;
 
 QueuePtr createQueue(int max);
 int isEmpty(QueuePtr q);
-void enqueue(QueuePtr q, LogMsg logMsg);
-LogMsg dequeue(QueuePtr q);
+void enqueue(QueuePtr q, LogBuf logBuf);
+LogBuf *dequeue(QueuePtr q);
 void printQueue(QueuePtr q);
