@@ -1,17 +1,20 @@
 /*
  * Name: Anton Johansson
  * Mail: dit06ajn@cs.umu.se
- * Time-stamp: "2009-05-28 23:46:40 anton"
+ * Time-stamp: "2009-05-31 15:24:25 anton"
  */
 
 #include "mcryptlogger.h"
 #include "queue.h"
+
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 
@@ -96,6 +99,9 @@ int main(int argc, char **argv) {
         if (pthread_create(&readThreadArray[i], NULL, readThreadInit, "hello") != 0) {
             fprintf(stderr, "Failed to create thread.\n");
         }
+    }
+    // Wait for read threads
+    for (int i = 0; i < nrOfReadThreads; i++) {
         pthread_join(readThreadArray[i], NULL);
     }
 
@@ -127,7 +133,39 @@ int readKey(char key[], int maxkeysize) {
 
 void *readThreadInit(void *ptr) {
     int id = global_counter++;
-    printf("Hello readThread!%s\n", (char*) ptr);
+
+    char fifo_name[1]; // TODO: fileLength
+    sprintf(fifo_name, "%d", id);
+    unlink(fifo_name); // Remove possibly existing fifo
+    
+    /* Create fifo */
+    if (mkfifo(fifo_name, S_IRWXU) != 0) {
+        fprintf(stderr, "Failed to create fifo");
+        exit(1);
+    }
+    
+    /* Open fifo for reading */
+    printf("Före file open id: %d\n", id);
+    int fd;
+    if ((fd = open(fifo_name, O_RDONLY)) < 0) {
+        fprintf(stderr, "Couldn't open fifo '%s' for reading", fifo_name);
+        unlink(fifo_name);
+        exit(1);
+    }
+    
+    /* Read from fifo until end-of file and print to stdout */
+    int n;
+    char buf[1024]; // TODO: fix size
+    printf("Hej detta är uskrivet från tråd id: %d\n ", id);
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        write(STDOUT_FILENO, buf, n);
+        printf("buf: %s", buf);
+    }
+    printf("Hej detta är uskrivet från tråd id: %d \n", id);
+    
+    close(fd);
+    unlink(fifo_name);
+    
     printf("Goodbye from tthread %d\n", id);
     return NULL;
 }
