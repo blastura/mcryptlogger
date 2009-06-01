@@ -1,10 +1,9 @@
+#ifndef MCRYPTLOGGER_H
+#define MCRYPTLOGGER_H
+
 #define LOG_MSG_SIZE 4000
 #define MAXKEYSIZE 127
 #define MAX_BUFS 4
-
-#ifndef LOGBUF
-//typedef struct my_struct_type my_short_type_t;
-#define LOGBUF 1
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -20,4 +19,5 @@ typedef struct {
     int fifo;
     unsigned char *message;
 } LogBuf;
-#endif /* LOGBUF  */
+
+#endif

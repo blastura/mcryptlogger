@@ -1,7 +1,7 @@
 /*
  * Name: Anton Johansson
  * Mail: dit06ajn@cs.umu.se
- * Time-stamp: "2009-06-01 11:55:50 anton"
+ * Time-stamp: "2009-06-01 19:08:35 anton"
  */
 
 #include "mcryptlogger.h"
@@ -26,7 +26,7 @@ void usage() {
     printf("Usage: mcryptlogger -C [number of computers] -B [number of buffers] -P [number of threads]\n");
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char* const argv[]) {
     // Check for flags
     int nrOfCryptThreads = 0;
     nrOfReadThreads = 0;
@@ -65,16 +65,17 @@ int main(int argc, char **argv) {
     freeBufQueue = createQueue(nrOfBuffers);
     filledBufQueue = createQueue(nrOfBuffers);
     printf("filledbufqueue: "); printQueue(filledBufQueue);
-    for (int i = 0; i < nrOfBuffers; i++) {
+    int i;
+    for (i = 0; i < nrOfBuffers; i++) {
         LogBuf b;
         b.fifo = -1;
         b.message = malloc(LOG_MSG_SIZE);
         enqueue(freeBufQueue, b);
         printf("enqueueing%d\n", i);
     }
-    
+
     printf("freeBufQueue: "); printQueue(freeBufQueue);
-    
+
     /* Read key from file `keys' */
     readKey(key, MAXKEYSIZE);
     printf("key: %s\n", key);
@@ -85,10 +86,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Couldn't init fifo_mutex\n");
         exit(1);
     }
-    
+
     /* Start read threads */
     pthread_t readThreadArray[nrOfReadThreads];
-    for (int i = 0; i < nrOfReadThreads; i++) {
+    for (i = 0; i < nrOfReadThreads; i++) {
         if (pthread_create(&readThreadArray[i], NULL, readThreadInit,
                            (void*) i) != 0) {
             fprintf(stderr, "Failed to create thread.\n");
@@ -97,7 +98,7 @@ int main(int argc, char **argv) {
 
     /* Start crypt threads */
     pthread_t cryptThreadArray[nrOfCryptThreads];
-    for (int i = 0; i < nrOfCryptThreads; i++) {
+    for (i = 0; i < nrOfCryptThreads; i++) {
         if (pthread_create(&cryptThreadArray[i], NULL, cryptThreadInit,
                            (void*) i) != 0) {
             fprintf(stderr, "Failed to create thread.\n");
@@ -105,15 +106,15 @@ int main(int argc, char **argv) {
     }
 
     // Wait for read threads
-    for (int i = 0; i < nrOfReadThreads; i++) {
+    for (i = 0; i < nrOfReadThreads; i++) {
         pthread_join(readThreadArray[i], NULL);
     }
 
     // Wait for crypt threads
-    for (int i = 0; i < nrOfCryptThreads; i++) {
+    for (i = 0; i < nrOfCryptThreads; i++) {
         pthread_join(cryptThreadArray[i], NULL);
     }
-    
+
     /* TODO: Cleanup free stuff */
     return 0;
 }
@@ -168,7 +169,7 @@ void *readThreadInit(void *ptr) {
         lbuf = dequeue(freeBufQueue);
         printf("ReadThread: Got a freeBuf.dequeue\n");
         printQueue(filledBufQueue);
-        
+
         /* Read rest of content (LOG_MSG_SIZE - 1) from fifo */
         if ((n = read(fd, rbuf, (LOG_MSG_SIZE - 1))) == (LOG_MSG_SIZE - 1)) {
             /* Create buffert containing message and fifo number */
@@ -202,7 +203,7 @@ void *cryptThreadInit(void *ptr) {
 
         printf("message to crypt fifo: %d\n", lbuf->fifo);
         //printf("message to crypt: %s\n", lbuf->message);
-        
+
         unsigned char *cryptMsg = xorcrypt(lbuf->message, LOG_MSG_SIZE, (unsigned char*) key);
         printf("cryptmsg: %s\n", cryptMsg);
         pthread_mutex_lock(&fifo_mutex);
