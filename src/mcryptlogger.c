@@ -1,7 +1,7 @@
 /*
  * Name: Anton Johansson
  * Mail: dit06ajn@cs.umu.se
- * Time-stamp: "2009-06-01 01:38:22 anton"
+ * Time-stamp: "2009-06-01 11:55:50 anton"
  */
 
 #include "mcryptlogger.h"
@@ -10,17 +10,14 @@
 
 /* Variables */
 static QueuePtr freeBufQueue;
-// pthread_mutex_t freeQueueMutex;
-// pthread_cond_t freeQueueCond;
-
 static QueuePtr filledBufQueue;
-// pthread_mutex_t filledQueueMutex;
-// pthread_cond_t filledQueueCond;
 
-char key[127];
+static char key[127];
+static int *fifo_count;
+static pthread_mutex_t fifo_mutex;
+static int nrOfReadThreads; // Number of fifos
 
 /* Methods */
-void *sayHello(void *ptr);
 void *readThreadInit(void *ptr);
 void *cryptThreadInit(void *ptr);
 int readKey(char key[], int maxkeysize);
@@ -32,7 +29,7 @@ void usage() {
 int main(int argc, char **argv) {
     // Check for flags
     int nrOfCryptThreads = 0;
-    int nrOfReadThreads = 0;
+    nrOfReadThreads = 0;
     int nrOfBuffers = 0;
     int ch;
     const char *optstring = "C:P:B:";
@@ -77,13 +74,18 @@ int main(int argc, char **argv) {
     }
     
     printf("freeBufQueue: "); printQueue(freeBufQueue);
-    dequeue(filledBufQueue);
     
     /* Read key from file `keys' */
-    char key[MAXKEYSIZE];
     readKey(key, MAXKEYSIZE);
     printf("key: %s\n", key);
 
+    /* Init fifo_count and fifo_mutex */
+    fifo_count = malloc(nrOfReadThreads);
+    if (pthread_mutex_init(&fifo_mutex, NULL) != 0) {
+        fprintf(stderr, "Couldn't init fifo_mutex\n");
+        exit(1);
+    }
+    
     /* Start read threads */
     pthread_t readThreadArray[nrOfReadThreads];
     for (int i = 0; i < nrOfReadThreads; i++) {
@@ -111,8 +113,8 @@ int main(int argc, char **argv) {
     for (int i = 0; i < nrOfCryptThreads; i++) {
         pthread_join(cryptThreadArray[i], NULL);
     }
-
-    sayHello("Förälder");
+    
+    /* TODO: Cleanup free stuff */
     return 0;
 }
 
@@ -143,7 +145,6 @@ void *readThreadInit(void *ptr) {
         exit(1);
     }
 
-
     while (1) {
         int fd;
         /* Open fifo for reading */
@@ -158,17 +159,14 @@ void *readThreadInit(void *ptr) {
         /* Wait for one byte from fifo */
         if ((n = read(fd, rbuf, 1)) == 1) {
             //write(STDOUT_FILENO, buf, n);
+            // TODO: fix to while loop
         }
 
-        
         /* Wait and read one byte from fifo */
         LogBuf *lbuf;
         /* Wait for a free buffer to fill */
-        while ((lbuf = dequeue(freeBufQueue)) == NULL) {
-            printf("Waiting for a freeBuf in freeBufQueue\n");
-            pthread_cond_wait(&freeBufQueue->cond, &freeBufQueue->mutex);
-        }
-        printf("ReadThread: Got a freeBuf from freeBufQueue\n");
+        lbuf = dequeue(freeBufQueue);
+        printf("ReadThread: Got a freeBuf.dequeue\n");
         printQueue(filledBufQueue);
         
         /* Read rest of content (LOG_MSG_SIZE - 1) from fifo */
@@ -197,29 +195,21 @@ void *cryptThreadInit(void *ptr) {
 
     while (1) {
 
-        LogBuf *buf;
         /* Wait for filledQueueCond, if another thread steals buffer
          * queue is still returns NULL then wait again */
-        while ((buf = dequeue(filledBufQueue)) == NULL) {
-            /* The pthread_cond_wait() function atomically unlocks the
-             * mutex argument and waits on the cond argument. */
-            printf("CryptThread: waiting for a filledBufQueue->cond\n");
-            pthread_cond_wait(&filledBufQueue->cond, &filledBufQueue->mutex);
-            printf("CryptThread: got a filledBufQueue->cond\n");
-        }
-        printf("CryptThread: got a Buf\n");
-        unsigned char *cryptMsg
-            = xorcrypt(buf->message, LOG_MSG_SIZE, (unsigned char*) key);
+        LogBuf *lbuf = dequeue(filledBufQueue);
+        fprintf(stderr, "CryptThread: got a filledBufQueue.dequeue\n");
+
+        printf("message to crypt fifo: %d\n", lbuf->fifo);
+        //printf("message to crypt: %s\n", lbuf->message);
+        
+        unsigned char *cryptMsg = xorcrypt(lbuf->message, LOG_MSG_SIZE, (unsigned char*) key);
         printf("cryptmsg: %s\n", cryptMsg);
+        pthread_mutex_lock(&fifo_mutex);
+        printf("fifo: %d, fifo_count: %d\n", lbuf->fifo, fifo_count[lbuf->fifo]++);
+        pthread_mutex_unlock(&fifo_mutex);
     }
 
     printf("Goodbye from crypt thread %d\n", id);
-    return NULL;
-}
-
-void* sayHello(void *ptr) {
-    int id = (int) ptr;
-    printf("Hello World!%s\n", (char*) ptr);
-    printf("Goodbye from tthread %d\n", id);
     return NULL;
 }

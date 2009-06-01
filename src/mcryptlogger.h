@@ -18,7 +18,6 @@
 
 typedef struct {
     int fifo;
-    int n;
     unsigned char *message;
 } LogBuf;
 #endif /* LOGBUF  */

@@ -1,0 +1,301 @@
+\documentclass[a4paper, 12pt]{article}
+\usepackage[swedish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage{verbatim}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\usepackage{parskip}
+\usepackage{minitoc}
+
+% Include pdf with multiple pages ex \includepdf[pages=-, nup=2x2]{filename.pdf}
+\usepackage[final]{pdfpages}
+% Place figures where they should be
+\usepackage{float}
+
+% Float for text
+\floatstyle{ruled}
+\newfloat{xml}{H}{lop}
+\floatname{xml}{XML}
+
+% vars
+\def\title{mcryptlogger}
+\def\preTitle{Laboration 3}
+\def\kurs{Systemprogrammering, VT-09}
+
+\def\namn{Anton Johansson}
+\def\mail{dit06ajn@cs.umu.se}
+\def\pathtocode{$\sim$dit06ajn/edu/5DV004/lab3}
+
+\def\handledareEtt{Johan Eliasson, johane@cs.umu.se}
+\def\handledareTva{Johan Granberg, johang@cs.umu.se}
+
+\def\inst{datavetenskap}
+\def\dokumentTyp{Laborationsrapport}
+
+\begin{document}
+\begin{titlepage}
+  \thispagestyle{empty}
+  \begin{small}
+    \begin{tabular}{@{}p{\textwidth}@{}}
+      UMEÅ UNIVERSITET \hfill \today \\
+      Institutionen för \inst \\
+      \dokumentTyp \\
+    \end{tabular}
+  \end{small}
+  \vspace{10mm}
+  \begin{center}
+    \LARGE{\preTitle} \\
+    \huge{\textbf{\kurs}} \\
+    \vspace{10mm}
+    \LARGE{\title} \\
+    \vspace{15mm}
+    \begin{large}
+        \namn, \mail \\
+        \texttt{\pathtocode}
+    \end{large}
+    \vfill
+    \large{\textbf{Handledare}}\\
+    \mbox{\large{\handledareEtt}}
+    \mbox{\large{\handledareTva}}
+  \end{center}
+\end{titlepage}
+
+\newpage
+\mbox{}
+\vspace{70mm}
+\begin{center}
+% Dedication goes here
+\end{center}
+\thispagestyle{empty}
+\newpage
+
+\pagestyle{fancy}
+\rhead{\today}
+\lhead{\namn, \mail}
+\chead{}
+\lfoot{}
+\cfoot{}
+\rfoot{}
+
+\cleardoublepage
+\newpage
+\dosecttoc 
+\tableofcontents
+\cleardoublepage
+
+\rfoot{\thepage}
+\pagenumbering{arabic}
+
+\section{Problemspecifikation}\label{sec:problemspecifikation}
+Laborationen gick ut på att skriva ett jobbhanteringssystem för att
+hantera långsam kryptering av loggmeddelanden. Krypteringsalgoritmen
+\textit{xorcrypt()} är tillräckligt långsam för att det krävs
+arbetsköer för loggmeddelanden som väntar på att krypteras.
+Loggmeddelanden kommer in till programmet via \textit{fifon}.
+
+Problemspecifikation finns i original på sidan:\\
+\begin{footnotesize}
+\verb!http://www.cs.umu.se/kurser/5DV004/VT09/labbar/lab3/index.html!
+\end{footnotesize}
+
+\section{Användarhandledning}\label{sec:anvandarhandledning}
+Källkoden till programmet finns i katalogen
+\verb!~dit06ajn/edu/5DV004/lab3! och kompileras genom att i en
+kommandopromt från denna katalog köra följande kommandon:
+
+\begin{verbatim}
+salt:dit06ajn:~/edu/5DV004/lab2$ make
+salt:dit06ajn:~/edu/5DV004/lab2$ make install
+\end{verbatim}
+
+Detta i sin tur kommer att kompilera de nödvändiga filerna i katalogen
+\verb!src! och placera en körbar fil \verb!msh! i katalogen
+\verb!bin!. Programmet körs från katalogen \verb!bin! enligt syntax:
+
+\begin{footnotesize}
+\begin{verbatim}
+./mcryptlogger -C [number of computers] -B [number of buffers]
+               -P [number of threads]
+\end{verbatim}
+\end{footnotesize}
+
+Ovan kommando utan parameter startar programmet med angivet
+\textit{-C} hur många datorer (trådar) som ska användas för att
+kryptera meddelanden som kommer in, \textit{-B} antalet buffrar som
+kommer att användas i köerna och \textit{-P} antalet trådar som kommer
+att användas för att bevaka \textit{fifo}s och läsa in meddelanden
+från dem för placering i köer.
+
+\section{Systembeskrivning}\label{sec:systembeskrivning}
+Systemet består i stort sett av två köer och ett antal trådar som
+hanterar olika flöden i programmets gång. Det finns en kö som håller
+ofyllda buffrar som kommer att fyllas med meddelanden som läses in.
+Den andra kön i programmet fylls med buffrar som redan är fyllda med
+information från \textit{fifo}s. Två trådar med olika beteenden kommer
+att startas upp, nedan följer kort beskrivning över dessa.
+
+\subsection{Lästråd}\label{sec:lastrad}
+Varje lästråd kommer att skapa en \textit{fifo} namngiven 1, 2, ...
+[antalet trådar]. Dessa \textit{fifos} öppnas för läsning, när det
+finns information så läses en byte och sedan väntar tråden på att det
+ska finnas en ledig buffert i kön som håller dessa. När detta finns så
+kommer denna buffert att fyllas och sättas in i kön som håller fyllda
+buffrar.
+
+\subsection{Krypteringstråd}\label{sec:krypteringstrad}
+Varje krypteringstråd ställer sig och väntar på att det kommer in en
+fylld buffert i kön som håller dessa. När detta inträffar kommer
+meddelandet i bufferten att krypteras och den krypterade informationen
+kommer att sparas i en fil med namn som börjar med vilken
+\textit{fifo} meddelandet är inläst från avslutat med vilket
+meddelande i turordningen det är, exempel \textit{0\_3} är tredje
+meddelande från \textit{fifo} noll.
+
+\subsection{Trådsäkerhet}\label{sec:tradsakerhet}
+Eftersom det är flera trådar som jobbar parallellt i detta program
+behövs det en del koller så att trådarna inte ändrar i samma buffrar
+och variabler samtidigt. Den största delen av trådsäkerheten är
+implementerad i köns \textit{dequeue}– och \textit{enqueue}–metoder.
+Varje kö har en \textit{pthread\_mutex\_t} variabel och en
+\textit{pthread\_cond\_t} variabel. När buffrar läggs in eller tas ut ur
+kön så låses köns \textit{mutex} variabel. Detta innebär att det inte
+kommer att bli några fel på grund av att två trådar anropar
+\textit{dequeue} och \textit{enqueue} samtidigt.
+
+Vid uttagande ur kön används dessutom \textit{pthread\_cond\_t}
+variabeln för att kolla så att kön inte är tom. Så länge kön är tom
+ställer sig tråden som anropar \textit{dequeue} och väntar på
+\textit{pthread\_cond\_t}. När ett meddelande sätts in, via en annans
+tråds anrop till \textit{enqueue}, körs metoden
+\textit{pthread\_cond\_signal()} för att meddela en av väntande köer
+att kön innehåller information. Dessa köer vaknar då upp och kollar om
+det finns något att plocka ut, finns inte detta (någon annan tråd han
+före) så ställer sig tråden återigen och väntar på
+\textit{pthread\_cond\_t} variabeln.
+
+\section{Testkörningar}\label{sec:testkorningar}
+Följande utskrifter visar någrascenarion där spårutskrifter inte är
+borttagna ur programmet:
+
+Starta mcryptlogger med en krypteringstråd, 2 buffrar, och 2 lästrådar (\textit{fifos}):
+\begin{footnotesize}
+\begin{verbatim}
+$:./mcryptlogger -C 1 -B 2 -P 2
+filledbufqueue: front(0), count(0)
+enqueue: waiting for lock!, 0
+enqueue: locked!, 0
+dequeue: unlocked!, 1
+Queue: not empty! Cond signal, 1
+enqueueing0
+enqueue: waiting for lock!, 1
+enqueue: locked!, 1
+dequeue: unlocked!, 2
+enqueueing1
+freeBufQueue: front(0), count(2)
+key: Detta är nyckel nr 0 på max 127 tecken ey.
+
+Hello from readthread 0
+filledBufQueue from readThread: front(0), count(0)
+Hello from readthread 1
+filledBufQueue from readThread: front(0), count(0)
+Hello cryptThreadInit! 0
+dequeue: waiting for lock!, 0
+dequeue: locked!, 0
+dequeue: Queue is empty, waiting for cond!
+\end{verbatim}
+\end{footnotesize}
+
+Skicka 4000 bytes till \textit{fifo} 0, med hjälp av skriptet i bilaga
+\ref{msg.sh}:
+\begin{footnotesize}
+\begin{verbatim}
+./msg.sh 0
+4+0 records in
+4+0 records out
+4000 bytes transferred in 0.000081 secs (49344753 bytes/sec)
+\end{verbatim}
+\end{footnotesize}
+
+Utskrift från ovan kommando:
+\begin{footnotesize}
+\begin{verbatim}
+dequeue: waiting for lock!, 2
+dequeue: locked!, 2
+Queue: dequeueing!, 2
+dequeue: unlocked!, 1
+ReadThread: Got a freeBuf.dequeue
+front(0), count(0)
+ReadThread: enqueuing new message
+front(0), count(0)
+enqueue: waiting for lock!, 0
+enqueue: locked!, 0
+dequeue: unlocked!, 1
+Queue: not empty! Cond signal, 1
+Queue: dequeueing!, 1
+dequeue: unlocked!, 0
+CryptThread: got a filledBufQueue.dequeue
+message to crypt fifo: 0
+kY\311\345xYd
+fifo: 0, fifo_count: 0
+dequeue: waiting for lock!, 0
+dequeue: locked!, 0
+dequeue: Queue is empty, waiting for cond!
+\end{verbatim}
+\end{footnotesize}
+
+\section{Lösningen begränsningar}\label{sec:losningensbegransningar}
+Implementationen så som den är inlämnad just när saknar hantering av
+signaler på ett vettigt sätt, det hade behövts utförligare
+testkörningar för att verifiera att programmet agerar som tänkt och
+att det är stabilt då det verkar vara tänkt för att köras som en
+\textit{demon}-process. Lösningens olika delar såsom kön och trådarna
+hade behövt tester för att säkerställa att de fungerar som de ska.
+
+\section{Problem och reflektioner}\label{sec:problemochreflektioner}
+Eftersom jag fortfarande känner mig väldigt oerfaren av C känns det
+som att man hade behövt en grundlig genomgång om \textit{heapen} och
+\textit{stacken} så man vet vad som är vettigt att returnera från
+funktioner så att man inte helt plötsligt råkar skriva över någon
+minnesplats som fortfarande används av någon buffert.
+
+\newpage
+\appendix
+\pagenumbering{arabic}
+\section{Bilagor}\label{Bilagor}
+% Källkoden ska finnas tillgänglig i er hemkatalog
+% ~/edu/apjava/lab1/. Bifoga även utskriven källkod.
+Härefter följer utskrifter från källkoden och andra filer som hör till
+denna laboration.
+
+\newpage
+\subsection{Makefile}\label{Makefile}
+\begin{scriptsize}
+  \verbatiminput{../src/Makefile}
+\end{scriptsize}
+
+\subsection{mcryptlogger.c}\label{mcryptlogger.c}
+\begin{scriptsize}
+  \verbatiminput{../src/mcryptlogger.c}
+\end{scriptsize}
+
+\subsection{mcryptlogger.h}\label{mcryptlogger.h}
+\begin{scriptsize}
+  \verbatiminput{../src/mcryptlogger.h}
+\end{scriptsize}
+
+\subsection{msg.sh}\label{msg.sh}
+\begin{scriptsize}
+  \verbatiminput{../src/msg.sh}
+\end{scriptsize}
+
+\subsection{queue.c}\label{queue.c}
+\begin{scriptsize}
+  \verbatiminput{../src/queue.c}
+\end{scriptsize}
+
+\subsection{queue.h}\label{queue.h}
+\begin{scriptsize}
+  \verbatiminput{../src/queue.h}
+\end{scriptsize}
+
+\end{document}

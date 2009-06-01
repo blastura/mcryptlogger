@@ -42,7 +42,9 @@ int isEmpty(QueuePtr q) {
 }
 
 void enqueue(QueuePtr q, LogBuf logBuf) {
+    fprintf(stderr, "enqueue: waiting for lock!, %d\n", q->count);
     pthread_mutex_lock(&q->mutex);
+    fprintf(stderr, "enqueue: locked!, %d\n", q->count);
     if (q->count >= q->max) {
         pthread_mutex_unlock(&q->mutex);
         fprintf(stderr, "Queue is full q->max: %d, q->count: %d!\n", q->max, q->count);
@@ -53,21 +55,24 @@ void enqueue(QueuePtr q, LogBuf logBuf) {
     q->contents[(q->front + q->count++) % q->max] = logBuf;
 
     pthread_mutex_unlock(&q->mutex);
+    fprintf(stderr, "dequeue: unlocked!, %d\n", q->count);
     if (q->count == 1 ) {
-        printf("Cond signal\n");
-        if (pthread_cond_broadcast(&q->cond) != 0) {
+        fprintf(stderr, "Queue: not empty! Cond signal, %d\n", q->count);
+        if (pthread_cond_signal(&q->cond) != 0) {
             fprintf(stderr, "Couldn't signal cond variable\n");
         }
     }
 }
 
 LogBuf *dequeue(QueuePtr q) {
+    fprintf(stderr, "dequeue: waiting for lock!, %d\n", q->count);
     pthread_mutex_lock(&q->mutex);
-    if (isEmpty(q)) {
-        pthread_mutex_unlock(&q->mutex);
-        fprintf(stderr, "Queue is empty!\n");
-        return NULL;
+    fprintf(stderr, "dequeue: locked!, %d\n", q->count);
+    while (isEmpty(q)) {
+        fprintf(stderr, "dequeue: Queue is empty, waiting for cond!\n");
+        pthread_cond_wait(&q->cond, &q->mutex);
     }
+    fprintf(stderr, "Queue: dequeueing!, %d\n", q->count);
     
     LogBuf *result;
     result = &q->contents[q->front];
@@ -75,6 +80,7 @@ LogBuf *dequeue(QueuePtr q) {
     q->front %= q->max;
     q->count--;
     pthread_mutex_unlock(&q->mutex);
+    fprintf(stderr, "dequeue: unlocked!, %d\n", q->count);
     /* Is there a risk to overwrite same memory with next insertion at
      * contents[q->front] since it is circular? */
     return result;

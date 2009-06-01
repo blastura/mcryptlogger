@@ -21,7 +21,7 @@ unsigned char* xorcrypt(unsigned char *src, size_t srclen, const unsigned char *
         return src;
     for (i = 0; i < srclen; ++i) 
         src[i] ^= key[i % keylen]; 
-    struct timespec extraEncryptiontime={20,0};
+    struct timespec extraEncryptiontime={2,0};
     nanosleep(&extraEncryptiontime,NULL);
     return src;
 }
