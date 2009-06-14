@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -g -lpthread -lrt
+CFLAGS=-Wall -g3 -gdwarf-2 #-lpthread -lrt
 LDFLAGS=
 BIN=mcryptlogger
 SOURCES.c=mcryptlogger.c xorcrypt.c queue.c

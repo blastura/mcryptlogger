@@ -1,7 +1,7 @@
 /*
  * Name: Anton Johansson
  * Mail: dit06ajn@cs.umu.se
- * Time-stamp: "2009-06-01 19:08:35 anton"
+ * Time-stamp: "2009-06-15 00:57:21 anton"
  */
 
 #include "mcryptlogger.h"
@@ -9,8 +9,8 @@
 #include "xorcrypt.h"
 
 /* Variables */
-static QueuePtr freeBufQueue;
-static QueuePtr filledBufQueue;
+Queue freeBufQueue;
+Queue filledBufQueue;
 
 static char key[127];
 static int *fifo_count;
@@ -27,6 +27,9 @@ void usage() {
 }
 
 int main(int argc, char* const argv[]) {
+    if (testQueue() != 0) {
+        exit(-1);
+    }
     // Check for flags
     int nrOfCryptThreads = 0;
     nrOfReadThreads = 0;
@@ -62,26 +65,33 @@ int main(int argc, char* const argv[]) {
     }
 
     /* Init Queues to hold Buffers with log messages */
-    freeBufQueue = createQueue(nrOfBuffers);
-    filledBufQueue = createQueue(nrOfBuffers);
-    printf("filledbufqueue: "); printQueue(filledBufQueue);
+    //extern Queue *freeBufQueue;
+    createQueue(&freeBufQueue, nrOfBuffers);
+    //extern Queue *filledBufQueue;
+    createQueue(&filledBufQueue, nrOfBuffers);
+    
+    printf("filledbufqueue: "); printQueue(&filledBufQueue);
     int i;
     for (i = 0; i < nrOfBuffers; i++) {
-        LogBuf b;
-        b.fifo = -1;
-        b.message = malloc(LOG_MSG_SIZE);
-        enqueue(freeBufQueue, b);
+        LogBuf *b;
+        b = malloc(sizeof(LogBuf));
+        b->fifo = -1;
+        b->message = malloc(LOG_MSG_SIZE);
+        enqueue(&freeBufQueue, b);
         printf("enqueueing%d\n", i);
     }
 
-    printf("freeBufQueue: "); printQueue(freeBufQueue);
+    printf("freeBufQueue: "); printQueue(&freeBufQueue);
 
     /* Read key from file `keys' */
     readKey(key, MAXKEYSIZE);
     printf("key: %s\n", key);
 
     /* Init fifo_count and fifo_mutex */
-    fifo_count = malloc(nrOfReadThreads);
+    fifo_count = malloc(nrOfReadThreads * sizeof(int));
+    for (i = 0; i < nrOfReadThreads; i++) {
+        fifo_count[i] = 0;
+    }
     if (pthread_mutex_init(&fifo_mutex, NULL) != 0) {
         fprintf(stderr, "Couldn't init fifo_mutex\n");
         exit(1);
@@ -136,8 +146,8 @@ int readKey(char key[], int maxkeysize) {
 void *readThreadInit(void *ptr) {
     int id = (int) ptr;
     printf("Hello from readthread %d\n", id);
-    printf("filledBufQueue from readThread: "); printQueue(filledBufQueue);
-    char fifo_name[2]; // TODO: fileLength
+    printf("filledBufQueue from readThread: "); printQueue(&filledBufQueue);
+    char fifo_name[(nrOfReadThreads + 1)]; // TODO: fileLength
     sprintf(fifo_name, "%d", id);
     unlink(fifo_name); // Remove possibly existing fifo
     /* Create fifo */
@@ -161,25 +171,26 @@ void *readThreadInit(void *ptr) {
         if ((n = read(fd, rbuf, 1)) == 1) {
             //write(STDOUT_FILENO, buf, n);
             // TODO: fix to while loop
+        } else {
+            fprintf(stderr, "ReadThread: Logg-message of incorrect size trying to read one byte: %d\n", n);
         }
 
-        /* Wait and read one byte from fifo */
-        LogBuf *lbuf;
         /* Wait for a free buffer to fill */
-        lbuf = dequeue(freeBufQueue);
-        printf("ReadThread: Got a freeBuf.dequeue\n");
-        printQueue(filledBufQueue);
+        LogBuf *lbuf = dequeue(&freeBufQueue);
+        printf("ReadThread: Got a freeBuf from dequeue(freeBufQueue)\n");
+        printQueue(&filledBufQueue);
 
         /* Read rest of content (LOG_MSG_SIZE - 1) from fifo */
         if ((n = read(fd, rbuf, (LOG_MSG_SIZE - 1))) == (LOG_MSG_SIZE - 1)) {
             /* Create buffert containing message and fifo number */
             lbuf->fifo = id;
-            lbuf->message = rbuf;// = {id, buf};
+            lbuf->message = rbuf;// = {id, buf};            
             fprintf(stderr, "ReadThread: enqueuing new message\n");
-            printQueue(filledBufQueue);
-            enqueue(filledBufQueue, *lbuf);
+            printQueue(&filledBufQueue);
+            enqueue(&filledBufQueue, lbuf);
         } else {
             fprintf(stderr, "ReadThread: Logg-message of incorrect size: %d\n", n);
+            exit(1);
         }
         close(fd);
     }
@@ -195,10 +206,9 @@ void *cryptThreadInit(void *ptr) {
     printf("Hello cryptThreadInit! %d\n", id);
 
     while (1) {
-
         /* Wait for filledQueueCond, if another thread steals buffer
          * queue is still returns NULL then wait again */
-        LogBuf *lbuf = dequeue(filledBufQueue);
+        LogBuf *lbuf = dequeue(&filledBufQueue);
         fprintf(stderr, "CryptThread: got a filledBufQueue.dequeue\n");
 
         printf("message to crypt fifo: %d\n", lbuf->fifo);
@@ -207,8 +217,25 @@ void *cryptThreadInit(void *ptr) {
         unsigned char *cryptMsg = xorcrypt(lbuf->message, LOG_MSG_SIZE, (unsigned char*) key);
         printf("cryptmsg: %s\n", cryptMsg);
         pthread_mutex_lock(&fifo_mutex);
-        printf("fifo: %d, fifo_count: %d\n", lbuf->fifo, fifo_count[lbuf->fifo]++);
+        printf("fifo: %d, fifo_count: %d\n", lbuf->fifo, fifo_count[lbuf->fifo]);
+        char outfile[5];// Up to four digits
+        sprintf(outfile, "%d_%d", lbuf->fifo, fifo_count[lbuf->fifo]++);
+        printf("name of outfile: %s\n", outfile);
         pthread_mutex_unlock(&fifo_mutex);
+        
+        int outfd;
+        if ((outfd = open(outfile, (O_WRONLY | O_CREAT), (S_IRUSR | 0000200))) < 0) {
+            perror("Couldn't open file:");
+            exit(-1);
+        }
+        
+        int nwrite;
+        if ((nwrite = write(outfd, cryptMsg, LOG_MSG_SIZE)) < 0) {
+            perror("Couldn't write to file:");
+        }
+        close(outfd);
+        
+        enqueue(&freeBufQueue, lbuf);
     }
 
     printf("Goodbye from crypt thread %d\n", id);

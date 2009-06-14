@@ -1,18 +1,18 @@
 #include "mcryptlogger.h" /* Get Buffer typedef */
 
-typedef struct Queue *QueuePtr;
-
-typedef struct Queue {
+typedef struct {
     int front;
     int count;
     int max;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
-    LogBuf *contents;
+    LogBuf **contents;
 } Queue;
 
-QueuePtr createQueue(int max);
-int isEmpty(QueuePtr q);
-void enqueue(QueuePtr q, LogBuf logBuf);
-LogBuf *dequeue(QueuePtr q);
-void printQueue(QueuePtr q);
+void createQueue(Queue *q, int max);
+void destroyQueue(Queue *q);
+int isEmpty(Queue *q);
+void enqueue(Queue *q, LogBuf *logBuf);
+LogBuf *dequeue(Queue *q);
+void printQueue(Queue *q);
+int testQueue();
